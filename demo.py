@@ -9,6 +9,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -23,6 +24,37 @@ from src.report import write_cards
 
 OUT = ROOT / "outputs"
 SEED = 42
+
+
+def plot_feature_shifts(cf, path: Path, patient_id: str = "") -> None:
+    """Grouped bars: original vs counterfactual on numeric fields that moved."""
+    numeric = [c for c in cf.changes if c["feature"] != "notes"]
+    if not numeric:
+        numeric = [
+            {
+                "feature": name,
+                "from": float(cf.original[name]),
+                "to": float(cf.counterfactual[name]),
+            }
+            for name in ("systolic_bp", "spo2", "glucose", "heart_rate")
+        ]
+    labels = [c["feature"].replace("_", " ") for c in numeric]
+    before = [float(c["from"]) for c in numeric]
+    after = [float(c["to"]) for c in numeric]
+    y = np.arange(len(labels))
+    fig, ax = plt.subplots(figsize=(7.2, 0.55 * len(labels) + 2.2))
+    ax.barh(y - 0.18, before, height=0.36, color="#e76f51", label="original")
+    ax.barh(y + 0.18, after, height=0.36, color="#2a9d8f", label="counterfactual")
+    ax.set_yticks(y, labels)
+    ax.invert_yaxis()
+    title = "What changed to flip the decision"
+    if patient_id:
+        title = f"{patient_id}: {title}"
+    ax.set_title(title)
+    ax.legend(frameon=False, loc="lower right")
+    fig.tight_layout()
+    fig.savefig(path, dpi=140)
+    plt.close(fig)
 
 
 def plot_proximity_sparsity(cfs, path: Path) -> None:
@@ -88,9 +120,12 @@ def main() -> None:
     )
     cloud = search_many(model, cloud_src, seed=SEED + 11)
     plot_proximity_sparsity(cloud, OUT / "proximity_vs_sparsity.png")
+    first_flipped = next((c for c in cards if c.flipped), cards[0])
+    first_id = ids[cards.index(first_flipped)] if first_flipped in cards else ids[0]
+    plot_feature_shifts(first_flipped, OUT / "feature_shifts.png", patient_id=str(first_id))
     stats = summarize(cloud)
     print("Batch CF metrics:", {k: round(v, 3) if isinstance(v, float) else v for k, v in stats.items()})
-    print(f"Wrote {OUT / 'cf_cards.md'} and {OUT / 'proximity_vs_sparsity.png'}")
+    print(f"Wrote {OUT / 'cf_cards.md'}, {OUT / 'proximity_vs_sparsity.png'}, {OUT / 'feature_shifts.png'}")
     for pid, cf in zip(ids, cards):
         print(f"  {pid}: pred={cf.original_label} -> {cf.counterfactual_label} flipped={cf.flipped} sparsity={cf.sparsity}")
 
